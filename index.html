@@ -3,45 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arc Reactor Hologram - 60FPS</title>
+    <title>Arc Reactor Hologram Control</title>
     <style>
-        /* Pitch Black Background */
-        body { 
-            margin: 0; 
-            background: #000; 
-            overflow: hidden; 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        #container { width: 100vw; height: 100vh; }
-        #input_video { display: none; } /* Hidden camera feed */
-        
-        /* Holographic UI */
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
         #ui {
             position: absolute;
-            top: 10%;
+            top: 20px;
             width: 100%;
             text-align: center;
             color: #00e5ff;
-            text-shadow: 0 0 15px #00e5ff;
+            text-shadow: 0 0 10px #00e5ff;
             pointer-events: none;
-            z-index: 10;
+            z-index: 100;
         }
-        .status-bar {
-            font-size: 10px;
-            letter-spacing: 2px;
-            opacity: 0.7;
-        }
+        #input_video { display: none; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <div class="status-bar">STARK INDUSTRIES • MARK 1</div>
-        <h2 id="status">CONNECTING SENSORS...</h2>
+        <h2 id="status">INITIALIZING...</h2>
+        <p>Raise hand to control Mark 1 Reactor</p>
     </div>
     
     <video id="input_video"></video>
-    <div id="container"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
@@ -61,79 +47,75 @@
 
         const statusEl = document.getElementById('status');
         let arcReactor;
+        let targetRotationX = 0;
+        let targetRotationY = 0;
 
         // --- 1. THREE.JS SCENE SETUP ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x000000); // Pitch Black
+        scene.background = new THREE.Color(0x000000);
 
         const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.z = 4;
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        // Performance Mod: Cap resolution slightly to boost FPS on Helio G70
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2)); 
-        renderer.toneMapping = THREE.ReinhardToneMapping;
-        document.getElementById('container').appendChild(renderer.domElement);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        document.body.appendChild(renderer.domElement);
 
-        // --- 2. HOLOGRAPHIC LIGHTING ---
-        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        // --- 2. LIGHTING ---
+        const ambient = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambient);
         
-        const centerGlow = new THREE.PointLight(0x00d4ff, 15, 10);
-        centerGlow.position.set(0, 0, 1);
-        scene.add(centerGlow);
+        const pointLight = new THREE.PointLight(0x00d4ff, 15, 10);
+        pointLight.position.set(0, 0, 1);
+        scene.add(pointLight);
 
-        // --- 3. LOADING ARC REACTOR (scene.gltf + scene.bin) ---
+        // --- 3. LOAD ARC REACTOR ---
         const loader = new GLTFLoader();
         loader.load('scene.gltf', (gltf) => {
             arcReactor = gltf.scene;
             
-            // Fix positioning and scale
+            // Centering logic
             const box = new THREE.Box3().setFromObject(arcReactor);
             const center = box.getCenter(new THREE.Vector3());
             arcReactor.position.sub(center);
             arcReactor.scale.set(0.6, 0.6, 0.6); 
 
-            // Add Glowing Material Effect
+            // Make the LED parts glow
             arcReactor.traverse((node) => {
                 if (node.isMesh) {
                     node.material.emissive = new THREE.Color(0x0066ff);
-                    node.material.emissiveIntensity = 1.5;
+                    node.material.emissiveIntensity = 2;
                 }
             });
             
             scene.add(arcReactor);
-            statusEl.innerText = "ARC REACTOR: ONLINE";
+            statusEl.innerText = "REACTOR ONLINE";
         }, (xhr) => {
             statusEl.innerText = `LOADING: ${Math.round(xhr.loaded / xhr.total * 100)}%`;
         });
 
-        // --- 4. MEDIAPIPE HAND TRACKING ---
+        // --- 4. HAND GESTURE LOGIC (MEDIAPIPE) ---
         const videoElement = document.getElementById('input_video');
         const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
 
         hands.setOptions({
             maxNumHands: 1,
-            modelComplexity: 0, // Lite model for 60fps on Realme C25
+            modelComplexity: 0, // Keeps 60FPS on Realme C25
             minDetectionConfidence: 0.5,
             minTrackingConfidence: 0.5
         });
 
         hands.onResults((results) => {
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const hand = results.multiHandLandmarks[0];
-                const indexTip = hand[8]; // Landmark 8 = Index Finger
-
-                if (arcReactor) {
-                    // Logic: Move hand left/right/up/down to rotate model
-                    const targetRotY = (indexTip.x - 0.5) * 4;
-                    const targetRotX = (indexTip.y - 0.5) * 4;
-                    
-                    // Smooth "Lerp" movement
-                    arcReactor.rotation.y += (targetRotY - arcReactor.rotation.y) * 0.1;
-                    arcReactor.rotation.x += (targetRotX - arcReactor.rotation.x) * 0.1;
-                }
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Index Finger Tip (Landmark 8) controls rotation
+                const indexTip = landmarks[8];
+                
+                // Map coordinates to rotation angles
+                targetRotationY = (indexTip.x - 0.5) * 6;
+                targetRotationX = (indexTip.y - 0.5) * 6;
             }
         });
 
@@ -143,26 +125,31 @@
         });
         cam.start();
 
-        // --- 5. ANIMATION LOOP ---
+        // --- 5. RENDER & SMOOTHING ---
         function animate() {
             requestAnimationFrame(animate);
             
-            // Subtle "Idle" Pulse
             if (arcReactor) {
-                const pulse = 0.6 + Math.sin(Date.now() * 0.003) * 0.01;
+                // Smooth rotation interpolation (Lerp)
+                arcReactor.rotation.y += (targetRotationY - arcReactor.rotation.y) * 0.08;
+                arcReactor.rotation.x += (targetRotationX - arcReactor.rotation.x) * 0.08;
+                
+                // Idle pulse effect
+                const pulse = 0.6 + Math.sin(Date.now() * 0.003) * 0.015;
                 arcReactor.scale.set(pulse, pulse, pulse);
             }
 
             renderer.render(scene, camera);
         }
+        animate();
 
+        // Handle Resize
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-
-        animate();
     </script>
 </body>
-</html>
+    </html>
+    
