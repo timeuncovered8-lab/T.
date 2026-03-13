@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arc Reactor Hologram - 60FPS</title>
+    <style>
+        /* Pitch Black Background */
+        body { 
+            margin: 0; 
+            background: #000; 
+            overflow: hidden; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #container { width: 100vw; height: 100vh; }
+        #input_video { display: none; } /* Hidden camera feed */
+        
+        /* Holographic UI */
+        #ui {
+            position: absolute;
+            top: 10%;
+            width: 100%;
+            text-align: center;
+            color: #00e5ff;
+            text-shadow: 0 0 15px #00e5ff;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .status-bar {
+            font-size: 10px;
+            letter-spacing: 2px;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div class="status-bar">STARK INDUSTRIES • MARK 1</div>
+        <h2 id="status">CONNECTING SENSORS...</h2>
+    </div>
+    
+    <video id="input_video"></video>
+    <div id="container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        const statusEl = document.getElementById('status');
+        let arcReactor;
+
+        // --- 1. THREE.JS SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000); // Pitch Black
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 4;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        // Performance Mod: Cap resolution slightly to boost FPS on Helio G70
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2)); 
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // --- 2. HOLOGRAPHIC LIGHTING ---
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambient);
+        
+        const centerGlow = new THREE.PointLight(0x00d4ff, 15, 10);
+        centerGlow.position.set(0, 0, 1);
+        scene.add(centerGlow);
+
+        // --- 3. LOADING ARC REACTOR (scene.gltf + scene.bin) ---
+        const loader = new GLTFLoader();
+        loader.load('scene.gltf', (gltf) => {
+            arcReactor = gltf.scene;
+            
+            // Fix positioning and scale
+            const box = new THREE.Box3().setFromObject(arcReactor);
+            const center = box.getCenter(new THREE.Vector3());
+            arcReactor.position.sub(center);
+            arcReactor.scale.set(0.6, 0.6, 0.6); 
+
+            // Add Glowing Material Effect
+            arcReactor.traverse((node) => {
+                if (node.isMesh) {
+                    node.material.emissive = new THREE.Color(0x0066ff);
+                    node.material.emissiveIntensity = 1.5;
+                }
+            });
+            
+            scene.add(arcReactor);
+            statusEl.innerText = "ARC REACTOR: ONLINE";
+        }, (xhr) => {
+            statusEl.innerText = `LOADING: ${Math.round(xhr.loaded / xhr.total * 100)}%`;
+        });
+
+        // --- 4. MEDIAPIPE HAND TRACKING ---
+        const videoElement = document.getElementById('input_video');
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 0, // Lite model for 60fps on Realme C25
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const hand = results.multiHandLandmarks[0];
+                const indexTip = hand[8]; // Landmark 8 = Index Finger
+
+                if (arcReactor) {
+                    // Logic: Move hand left/right/up/down to rotate model
+                    const targetRotY = (indexTip.x - 0.5) * 4;
+                    const targetRotX = (indexTip.y - 0.5) * 4;
+                    
+                    // Smooth "Lerp" movement
+                    arcReactor.rotation.y += (targetRotY - arcReactor.rotation.y) * 0.1;
+                    arcReactor.rotation.x += (targetRotX - arcReactor.rotation.x) * 0.1;
+                }
+            }
+        });
+
+        const cam = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+        cam.start();
+
+        // --- 5. ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Subtle "Idle" Pulse
+            if (arcReactor) {
+                const pulse = 0.6 + Math.sin(Date.now() * 0.003) * 0.01;
+                arcReactor.scale.set(pulse, pulse, pulse);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
